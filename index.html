@@ -1,0 +1,270 @@
+<script src="bower_components/spotify-web-api-js/src/spotify-web-api.js"></script>
+<script src="http://ajax.googleapis.com/ajax/libs/jquery/1.9.0/jquery.min.js"></script>
+
+<video autoplay="true" id="videoElement"></video>
+<input id="b" type="button" disabled="true" value="Take Picture"></input>
+<canvas id="canvas" width="1000" height="700"></canvas>
+<span id="audio"></span>
+
+<script>
+var video = document.querySelector("#videoElement");
+var canvas = document.getElementById("canvas");
+var button = document.getElementById("b");
+var audioObject = document.getElementById("audio");
+var currentTrack = "";
+
+var spotifyApi = new SpotifyWebApi();
+var access_token = 'BQCG9dxhm3O0WpFDVP5RwMCQI3jWbAIhb7KBuj5aFubjD2YhpHgn8yqmR5frGqtVtWX0LtUpDLHHYiw4a1yxUvz7uZsj89Zm1QtZulcGK5YnYzglqnPC4xEZYMqFqywcBFimLvnSs-NVs45OVaBBOdINcSF5UW_6HHCI';
+spotifyApi.setAccessToken(access_token);
+
+var subscriptionKey = "add7ab68d47f4a5792c8c4a9b6b48278";
+
+var faceListId = 'song_faces';
+function findSameFace(queryUser, sourceImageBlob){
+  var params = {
+      // Request parameters
+  };
+  $.ajax({
+      url: "https://westcentralus.api.cognitive.microsoft.com/face/v1.0/findsimilars?" + $.param(params),
+      //Request headers
+      beforeSend: function(xhrObj){
+          xhrObj.setRequestHeader("Content-Type","application/json");
+          xhrObj.setRequestHeader("Ocp-Apim-Subscription-Key", subscriptionKey);
+      },
+      type: "POST",
+      // Request body.
+      data: JSON.stringify({faceId: queryUser.faceId, faceListId: 'song_faces'})
+  })
+  .done(function(data) {
+      //alert("success");
+      console.log(data);
+      // data contains array of same user occurences
+      if (!Array.isArray(data) || data.length == 0) {
+        //User is unique
+        getNewSong(queryUser.faceAttributes.smile, queryUser.faceAttributes.emotion, queryUser.faceAttributes.age, sourceImageBlob);
+      } else {
+        //User has been seen before
+        getSong(data[0].persistedFaceId);
+      }
+  })
+  .fail(function(data) {
+      console.log(data);
+      alert("error");
+  });
+}
+function addFace(sourceImageBlob, track){
+  var params = {
+      "userData": track.preview_url
+  };
+  console.log(track.preview_url);
+  console.log($.param(params));
+  $.ajax({
+      url: "https://westcentralus.api.cognitive.microsoft.com/face/v1.0/facelists/song_faces/persistedFaces?" + $.param(params),
+      //Request headers
+      beforeSend: function(xhrObj){
+          xhrObj.setRequestHeader("Content-Type","application/octet-stream");
+          xhrObj.setRequestHeader("Ocp-Apim-Subscription-Key", subscriptionKey);
+      },
+      processData: false,
+      type: "POST",
+      // Request body.
+      data: sourceImageBlob,
+  })
+  .done(function(data) {
+      console.log("Added face to list!");
+      //console.log(data);
+  })
+  .fail(function(data) {
+      console.log(data);
+      alert("Error adding face to list");
+  });
+}
+
+/*
+$.ajax({
+    url: "https://westcentralus.api.cognitive.microsoft.com/face/v1.0/facelists/song_faces?" + $.param(params),
+    beforeSend: function(xhrObj){
+        // Request headers
+        xhrObj.setRequestHeader("Content-Type","application/json");
+        xhrObj.setRequestHeader("Ocp-Apim-Subscription-Key",subscriptionKey);
+    },
+    type: "PUT",
+    // Request body
+    data: JSON.stringify({name: "s_faces"})
+})
+.done(function(data) {
+    alert("success");
+})
+.fail(function(data) {
+console.log(data);
+    alert("error");
+});*/
+function getSong(persistedFaceId, ){
+  var params = {};
+  $.ajax({
+      url: "https://westcentralus.api.cognitive.microsoft.com/face/v1.0/facelists/song_faces?" + $.param(params),
+      //Request headers
+      beforeSend: function(xhrObj){
+        xhrObj.setRequestHeader("Ocp-Apim-Subscription-Key", subscriptionKey);
+      },
+      type: "GET",
+      // Request body.
+      data: "{}"
+  })
+  .done(function(data) {
+      console.log("Got existing face");
+      console.log(persistedFaceId);
+      console.log(data.persistedFaces.length);
+      var i = data.persistedFaces.length - 1;
+      var found = false;
+      while (i >= 0 && !found){
+        if (data.persistedFaces[i].persistedFaceId == persistedFaceId){
+          found = true;
+          if (data.persistedFaces[i].userData !== currentTrack){
+            currentTrack = data.persistedFaces[i].userData;
+            console.log(currentTrack);
+            var str = '<audio autoplay><source src=\"' + currentTrack + '\"></audio>';
+            console.log(str);
+            $('#audio').html(str);
+            //audioObject.src = currentTrack;
+            //audioObject.play();
+          }
+        }
+        i--;
+      }
+      console.log(found);
+  })
+  .fail(function(data) {
+      console.log(data);
+      alert("Error adding face to list");
+  });
+}
+
+function getNewSong(smile, emotion, age, sourceImageBlob){
+  target = {};
+  target['seed_genres'] = 'soundtracks';
+  target['mode'] = smile;
+  target['valence'] = emotion.happiness;
+  //target['instrumentalness'] = emotion.sadness;
+  target['energy'] = Math.min(1.0, (100-age)/100);
+  console.log(target);
+  spotifyApi.getRecommendations(target)
+    .then(function(data) {
+      var found = false;
+      var i = 0;
+      while (!found && i <= 20){
+        track_url = data.tracks[i].preview_url;
+        if (track_url){
+          found = true;
+        } else{
+          i++;
+        }
+      }
+
+      console.log('Song', data.tracks[i].name);
+      addFace(sourceImageBlob, data.tracks[i]);
+      if (data.tracks[i].preview_url !== currentTrack){
+        currentTrack = data.tracks[i].preview_url;
+        audioObject.src = track_url;
+        audioObject.play();
+      }
+    }, function(err) {
+      console.error(err);
+    });
+}
+/*
+spotifyApi.getAvailableGenreSeeds()
+.then(function(data){
+  console.log(data);
+});*/
+
+makeblob = function (dataURL) {
+    var BASE64_MARKER = ';base64,';
+    if (dataURL.indexOf(BASE64_MARKER) == -1) {
+        var parts = dataURL.split(',');
+        var contentType = parts[0].split(':')[1];
+        var raw = decodeURIComponent(parts[1]);
+        return new Blob([raw], { type: contentType });
+    }
+    var parts = dataURL.split(BASE64_MARKER);
+    var contentType = parts[0].split(':')[1];
+    var raw = window.atob(parts[1]);
+    var rawLength = raw.length;
+
+    var uInt8Array = new Uint8Array(rawLength);
+
+    for (var i = 0; i < rawLength; ++i) {
+        uInt8Array[i] = raw.charCodeAt(i);
+    }
+
+    return new Blob([uInt8Array], { type: contentType });
+};
+
+function processImage(sourceImageBlob) {
+    var uriBase = "https://westcentralus.api.cognitive.microsoft.com/face/v1.0/detect";
+
+    // Request parameters.
+    var params = {
+        "returnFaceId": "true",
+        "returnFaceLandmarks": "false",
+        "returnFaceAttributes": "age,gender,headPose,smile,facialHair,glasses,emotion,hair,makeup",
+    };
+    console.log($.param(params));
+    // Perform the REST API call.
+    $.ajax({
+        url: uriBase + "?" + $.param(params),
+        // Request headers.
+        beforeSend: function(xhrObj){
+            xhrObj.setRequestHeader("Content-Type","application/octet-stream");
+            xhrObj.setRequestHeader("Ocp-Apim-Subscription-Key", subscriptionKey);
+        },
+        processData: false,
+        type: "POST",
+        // Request body.
+        data: sourceImageBlob,
+    })
+
+    .done(function(data) {
+        // Show formatted JSON on webpage.
+        console.log(data);
+        //console.log(params);
+        findSameFace(data[0],sourceImageBlob);
+        //addFace(sourceImageBlob);
+        //$("#responseTextArea").val(JSON.stringify(data, null, 2));
+    })
+
+    .fail(function(jqXHR, textStatus, errorThrown) {
+        // Display error message.
+        var errorString = (errorThrown === "") ? "Error. " : errorThrown + " (" + jqXHR.status + "): ";
+        errorString += (jqXHR.responseText === "") ? "" : (jQuery.parseJSON(jqXHR.responseText).message) ?
+            jQuery.parseJSON(jqXHR.responseText).message : jQuery.parseJSON(jqXHR.responseText).error.message;
+        alert(errorString);
+    });
+};
+function handleVideo(stream) {
+    video.src = window.URL.createObjectURL(stream);
+    button.disabled = false;
+    var renew = setInterval(function(){
+      canvas.getContext("2d").drawImage(video, 0, 0, 1000, 700);
+      var img = canvas.toDataURL("image/jpeg");
+      a = makeblob(img);
+      processImage(a);
+    }, 10000);
+    button.onclick = function() {
+			canvas.getContext("2d").drawImage(video, 0, 0, 1000, 700);
+			var img = canvas.toDataURL("image/jpeg");
+      a = makeblob(img);
+      processImage(a);
+		};
+}
+
+function videoError(e) {
+    // do something
+}
+
+navigator.getUserMedia = navigator.getUserMedia || navigator.webkitGetUserMedia || navigator.mozGetUserMedia || navigator.msGetUserMedia || navigator.oGetUserMedia;
+if (navigator.getUserMedia) {
+    navigator.getUserMedia({video: true}, handleVideo, videoError);
+}
+
+</script>
